@@ -49,7 +49,7 @@ jobs:
       - name: Find open PR for source branch
         id: pr
         if: steps.branch.outputs.is_merge == 'true'
-        uses: peter-evans/find-pull-request@v3
+        uses: peter-evans/find-pull-requests@v3
         with:
           branch: ${{ steps.branch.outputs.branch_name }}
           state: open
