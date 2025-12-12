@@ -26,6 +26,6 @@ jobs:
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: "hml-add-label.yml",
+              workflow_id: "hml-merge-label.yml",
               ref: "hml"
             })
