@@ -13,10 +13,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh jq
+
       - name: Get merge commit parents
         id: parents
         run: |
-          # Pega os "pais" do commit (merge tem 2 pais)
           PARENTS=$(git rev-list --parents -n 1 ${{ github.sha }})
           echo "parents=$PARENTS" >> $GITHUB_OUTPUT
           echo "Parents: $PARENTS"
@@ -30,34 +34,49 @@ jobs:
           count=$(echo "$parents" | wc -w)
 
           if [ "$count" -ne 3 ]; then
-            echo "Not a merge commit. Exiting."
+            echo "Not a merge commit"
             echo "is_merge=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # O primeiro SHA é o commit, os outros 2 são os pais
-          # Pegamos o segundo pai, que é o da feature branch
+          # Pega o segundo pai, que é a branch de origem
           second_parent=$(echo "$parents" | awk '{print $3}')
 
-          # Descobre o nome da branch do segundo pai
+          # Descobre a branch que contém o commit (exceto hml)
           branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/ *origin\///')
 
           echo "is_merge=true" >> $GITHUB_OUTPUT
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
-          echo "Source branch: $branch_name"
+          echo "Source branch detected: $branch_name"
 
-      - name: Find open PR for source branch
+      - name: Find open PR for source branch using GitHub CLI
         id: pr
         if: steps.branch.outputs.is_merge == 'true'
-        uses: peter-evans/find-pull-requests@v3
-        with:
-          branch: ${{ steps.branch.outputs.branch_name }}
-          state: open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="${{ steps.branch.outputs.branch_name }}"
 
-      - name: Add using-hml label to PR
-        if: steps.pr.outputs.pull-request-number != ''
-        uses: actions-ecosystem/action-add-labels@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          labels: using-hml
-          number: ${{ steps.pr.outputs.pull-request-number }}
+          PR_NUMBER=$(gh pr list \
+            --state open \
+            --head "$branch" \
+            --json number \
+            --jq '.[0].number')
+
+          echo "pull_request_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Found PR: $PR_NUMBER"
+
+      - name: Add using-hml label to PR via GitHub API
+        if: steps.pr.outputs.pull_request_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ steps.pr.outputs.pull_request_number }}
+
+          echo "Labeling PR #$PR_NUMBER"
+
+          curl -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/labels \
+            -d '{"labels": ["using-hml"]}'
