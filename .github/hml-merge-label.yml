@@ -1,0 +1,63 @@
+name: Label PR merged into HML
+
+on:
+  push:
+    branches:
+      - hml
+
+jobs:
+  label-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get merge commit parents
+        id: parents
+        run: |
+          # Pega os "pais" do commit (merge tem 2 pais)
+          PARENTS=$(git rev-list --parents -n 1 ${{ github.sha }})
+          echo "parents=$PARENTS" >> $GITHUB_OUTPUT
+          echo "Parents: $PARENTS"
+
+      - name: Extract source branch name (if merge commit)
+        id: branch
+        run: |
+          parents="${{ steps.parents.outputs.parents }}"
+
+          # Conta quantidade de SHAs
+          count=$(echo "$parents" | wc -w)
+
+          if [ "$count" -ne 3 ]; then
+            echo "Not a merge commit. Exiting."
+            echo "is_merge=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # O primeiro SHA é o commit, os outros 2 são os pais
+          # Pegamos o segundo pai, que é o da feature branch
+          second_parent=$(echo "$parents" | awk '{print $3}')
+
+          # Descobre o nome da branch do segundo pai
+          branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/ *origin\///')
+
+          echo "is_merge=true" >> $GITHUB_OUTPUT
+          echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
+          echo "Source branch: $branch_name"
+
+      - name: Find open PR for source branch
+        id: pr
+        if: steps.branch.outputs.is_merge == 'true'
+        uses: peter-evans/find-pull-request@v3
+        with:
+          branch: ${{ steps.branch.outputs.branch_name }}
+          state: open
+
+      - name: Add using-hml label to PR
+        if: steps.pr.outputs.pull-request-number != ''
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: using-hml
+          number: ${{ steps.pr.outputs.pull-request-number }}
