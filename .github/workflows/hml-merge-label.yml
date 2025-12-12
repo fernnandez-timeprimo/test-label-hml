@@ -1,13 +1,16 @@
 name: Label PR merged into HML
 
 on:
-  push:
-    branches:
-      - hml
+  workflow_dispatch:
 
 jobs:
   label-pr:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout
@@ -31,8 +34,6 @@ jobs:
         id: branch
         run: |
           parents="${{ steps.parents.outputs.parents }}"
-
-          # Conta quantidade de SHAs
           count=$(echo "$parents" | wc -w)
 
           if [ "$count" -ne 3 ]; then
@@ -41,44 +42,40 @@ jobs:
             exit 0
           fi
 
-          # Pega o segundo pai, que é a branch de origem
           second_parent=$(echo "$parents" | awk '{print $3}')
-
-          # Descobre a branch que contém o commit (exceto hml)
-          branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/ *origin\///')
+          branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/origin\///')
 
           echo "is_merge=true" >> $GITHUB_OUTPUT
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
-          echo "Source branch detected: $branch_name"
 
-      - name: Find open PR for source branch using GitHub CLI
+      - name: Find open PR for source branch
         id: pr
         if: steps.branch.outputs.is_merge == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          branch="${{ steps.branch.outputs.branch_name }}"
+          BRANCH="${{ steps.branch.outputs.branch_name }}"
+          PR=$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number')
+          echo "pr_number=$PR" >> $GITHUB_OUTPUT
 
-          PR_NUMBER=$(gh pr list \
-            --state open \
-            --head "$branch" \
-            --json number \
-            --jq '.[0].number')
-
-          echo "pull_request_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "Found PR: $PR_NUMBER"
-
-      - name: Add using-hml label to PR via GitHub API
-        if: steps.pr.outputs.pull_request_number != ''
+      - name: Remove using-hml from all other PRs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_NUMBER=${{ steps.pr.outputs.pull_request_number }}
+          ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
 
-          echo "Labeling PR #$PR_NUMBER"
+          for pr in $ALL; do
+            if [ "$pr" != "${{ steps.pr.outputs.pr_number }}" ]; then
+              echo "Removing label from PR #$pr..."
+              gh pr edit $pr --remove-label "using-hml"
+            fi
+          done
 
-          curl -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/labels \
-            -d '{"labels": ["using-hml"]}'
+      - name: Add using-hml label to this PR
+        if: steps.pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ steps.pr.outputs.pr_number }}
+          echo "Adding using-hml to PR #$PR"
+          gh pr edit "$PR" --add-label "using-hml"
