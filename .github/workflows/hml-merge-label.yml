@@ -43,7 +43,16 @@ jobs:
           fi
 
           second_parent=$(echo "$parents" | awk '{print $3}')
-          branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/origin\///')
+          echo "Second parent commit: $second_parent"
+          
+          # Lista todas as branches remotas que contêm o segundo parent
+          echo "Branches containing second parent:"
+          git branch -r --contains $second_parent
+          
+          # Extrai o nome da branch, removendo espaços em branco
+          branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/.*origin\///' | xargs)
+          
+          echo "Extracted branch name: '$branch_name'"
 
           echo "is_merge=true" >> $GITHUB_OUTPUT
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
@@ -55,8 +64,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="${{ steps.branch.outputs.branch_name }}"
+          echo "Looking for PR with head branch: '$BRANCH'"
+          
+          # Lista todos os PRs abertos para debug
+          echo "All open PRs:"
+          gh pr list --state open --json number,headRefName --jq '.[] | "\(.number): \(.headRefName)"'
+          
           PR=$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number')
-          echo "pr_number=$PR" >> $GITHUB_OUTPUT
+          echo "Found PR: $PR"
+          
+          if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+            echo "No PR found for branch '$BRANCH'"
+            echo "pr_number=" >> $GITHUB_OUTPUT
+          else
+            echo "pr_number=$PR" >> $GITHUB_OUTPUT
+          fi
 
       - name: Remove using-hml from all other PRs
         env:
@@ -76,6 +98,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR=${{ steps.pr.outputs.pr_number }}
-          echo "Adding using-hml to PR #$PR"
-          gh pr edit "$PR" --add-label "using-hml"
+          PR="${{ steps.pr.outputs.pr_number }}"
+          if [ -n "$PR" ] && [ "$PR" != "null" ]; then
+            echo "Adding using-hml to PR #$PR"
+            gh pr edit "$PR" --add-label "using-hml"
+          else
+            echo "No PR number available, skipping label addition"
+          fi
