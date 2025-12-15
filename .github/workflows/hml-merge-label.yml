@@ -43,16 +43,7 @@ jobs:
           fi
 
           second_parent=$(echo "$parents" | awk '{print $3}')
-          echo "Second parent commit: $second_parent"
-          
-          # Lista todas as branches remotas que contêm o segundo parent
-          echo "Branches containing second parent:"
-          git branch -r --contains $second_parent
-          
-          # Extrai o nome da branch, removendo espaços em branco
           branch_name=$(git branch -r --contains $second_parent | grep -v "origin/hml" | head -n 1 | sed 's/.*origin\///' | xargs)
-          
-          echo "Extracted branch name: '$branch_name'"
 
           echo "is_merge=true" >> $GITHUB_OUTPUT
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
