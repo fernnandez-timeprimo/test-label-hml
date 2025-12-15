@@ -71,21 +71,43 @@ jobs:
             echo "pr_number=$PR" >> $GITHUB_OUTPUT
           fi
 
-      - name: Remove using-hml from all other PRs
+      - name: Remove using-hml from all PRs (non-merge commit)
+        if: steps.branch.outputs.is_merge != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "This is NOT a merge commit - removing using-hml from ALL PRs"
+          ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
+          
+          if [ -z "$ALL" ]; then
+            echo "No PRs with using-hml label found"
+          else
+            for pr in $ALL; do
+              echo "Removing label from PR #$pr..."
+              gh pr edit $pr --remove-label "using-hml"
+            done
+          fi
+
+      - name: Remove using-hml from other PRs (merge commit)
+        if: steps.branch.outputs.is_merge == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "This IS a merge commit - removing using-hml from other PRs"
+          CURRENT_PR="${{ steps.pr.outputs.pr_number }}"
           ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
 
           for pr in $ALL; do
-            if [ "$pr" != "${{ steps.pr.outputs.pr_number }}" ]; then
+            if [ "$pr" != "$CURRENT_PR" ]; then
               echo "Removing label from PR #$pr..."
               gh pr edit $pr --remove-label "using-hml"
+            else
+              echo "Keeping label on current PR #$pr"
             fi
           done
 
       - name: Add using-hml label to this PR
-        if: steps.pr.outputs.pr_number != ''
+        if: steps.branch.outputs.is_merge == 'true' && steps.pr.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
