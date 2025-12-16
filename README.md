@@ -1,7 +1,7 @@
 # Controle de PRs Mergeados na Branch HML
 
-Este repositório apresenta uma **proposta de melhoria** no fluxo de integração de PRs na branch `hml`.  
-A ideia é automatizar a **identificação de PRs mergeados** e garantir visibilidade e unicidade através da label `using-hml`.
+Este repositório apresenta uma **automação** no fluxo de integração de PRs na branch `hml`.  
+A ideia é automatizar a **identificação de PRs mergeados** e garantir visibilidade através da label `using-hml`.
 
 ---
 
@@ -9,8 +9,9 @@ A ideia é automatizar a **identificação de PRs mergeados** e garantir visibil
 
 1. Identificar automaticamente PRs mergeados em `hml`.
 2. Adicionar a label `using-hml` ao PR correspondente.
-3. Garantir que **apenas um PR por vez** tenha a label `using-hml`.
-4. Melhorar visibilidade para o time sobre quais PRs já foram integrados à HML.
+3. Permitir **múltiplos PRs** com a label `using-hml` (concatenação de implementações).
+4. Resetar o ambiente removendo todas as labels via **force push** da main.
+5. Remover a label de PRs revertidos.
 
 ---
 
@@ -20,22 +21,72 @@ O workflow dispara **sempre que há um push na branch `hml`**:
 
 ```mermaid
 flowchart TD
-    A[Push na branch HML] --> B[Identifica merge commit]
-    B --> C[Localiza PR de origem]
-    C --> D[Remove label `using-hml` de outros PRs]
-    D --> E[Adiciona label `using-hml` ao PR correto]
+    A[Push na branch HML] --> B{HML = main? force push}
+    B -->|Sim| C[🔄 RESET: Remove TODAS as labels]
+    B -->|Não| D{É revert commit?}
+    D -->|Sim| E[Remove label do PR revertido]
+    D -->|Não| F{É merge commit?}
+    F -->|Não| G[Nenhuma ação]
+    F -->|Sim| H[Localiza PR de origem]
+    H --> I[➕ Adiciona label usando-hml ao PR]
 ```
 
-### Benefícios
+---
 
-1. Visibilidade clara de PRs integrados à HML.
+## Cenários
 
-2. Workflow totalmente automático, sem intervenção manual.
+| Ação | Resultado |
+|------|-----------|
+| Merge de `feature-a` em `hml` | ➕ Adiciona `using-hml` no PR da feature-a |
+| Merge de `feature-b` em `hml` | ➕ Adiciona `using-hml` no PR da feature-b (feature-a **mantém** a label) |
+| **Force push da main em hml** | 🔄 Remove `using-hml` de **todos** os PRs (reset do ambiente) |
+| Revert do merge de `feature-a` | ➖ Remove `using-hml` **apenas** do PR da feature-a |
 
-3. Facilita auditoria e acompanhamento do progresso do time.
+---
 
-### Como testar 
+## Benefícios
 
-crie uma branch a partir da `main`, abra um `pull request` pra `main` e por fim faça o merge dessa branch em `hml`
+1. **Visibilidade clara** de PRs integrados à HML.
+2. **Múltiplos PRs** podem estar em HML simultaneamente (concatenação de features).
+3. **Reset fácil** do ambiente via force push.
+4. **Reverts tratados** automaticamente, removendo a label do PR revertido.
+5. Workflow totalmente automático, sem intervenção manual.
 
-o PR deve ser marcado com a label `using-hml` e a mesma deve ser removida de outros PRs
+---
+
+## Como testar
+
+### Adicionar label a um PR
+1. Crie uma branch a partir da `main`
+2. Abra um `pull request` para `main`
+3. Faça o merge dessa branch em `hml`
+4. ✅ O PR será marcado com a label `using-hml`
+
+### Concatenar múltiplos PRs em HML
+1. Repita o processo acima para múltiplas branches
+2. ✅ Todos os PRs mergeados terão a label `using-hml`
+
+### Resetar o ambiente HML
+
+```bash
+git push --force origin main:hml
+```
+
+✅ Todas as labels `using-hml` serão removidas
+
+### Reverter um merge
+1. Faça revert de um merge commit em `hml`
+2. ✅ A label `using-hml` será removida apenas do PR correspondente
+
+---
+
+## Estrutura dos Workflows
+
+### `deploy-hml.yml`
+- Dispara no push para `hml`
+- Executa o deploy (fake neste exemplo)
+- Aciona o workflow de labels
+
+### `apply-using-hml-label.yml`
+- Detecta o tipo de commit (reset/force push, revert, merge de feature)
+- Aplica ou remove labels conforme o cenário
