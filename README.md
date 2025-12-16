@@ -10,7 +10,7 @@ A ideia é automatizar a **identificação de PRs mergeados** e garantir visibil
 1. Identificar automaticamente PRs mergeados em `hml`.
 2. Adicionar a label `using-hml` ao PR correspondente.
 3. Permitir **múltiplos PRs** com a label `using-hml` (concatenação de implementações).
-4. Resetar o ambiente removendo todas as labels quando a `main` for mergeada em `hml`.
+4. Resetar o ambiente removendo todas as labels via **force push** da main.
 5. Remover a label de PRs revertidos.
 
 ---
@@ -21,13 +21,13 @@ O workflow dispara **sempre que há um push na branch `hml`**:
 
 ```mermaid
 flowchart TD
-    A[Push na branch HML] --> B{É revert commit?}
-    B -->|Sim| C[Remove label do PR revertido]
-    B -->|Não| D{É merge commit?}
-    D -->|Não| E[Nenhuma ação]
-    D -->|Sim| F{Merge da main?}
-    F -->|Sim| G[🔄 RESET: Remove label de TODOS os PRs]
-    F -->|Não| H[Localiza PR de origem]
+    A[Push na branch HML] --> B{HML = main? force push}
+    B -->|Sim| C[🔄 RESET: Remove TODAS as labels]
+    B -->|Não| D{É revert commit?}
+    D -->|Sim| E[Remove label do PR revertido]
+    D -->|Não| F{É merge commit?}
+    F -->|Não| G[Nenhuma ação]
+    F -->|Sim| H[Localiza PR de origem]
     H --> I[➕ Adiciona label usando-hml ao PR]
 ```
 
@@ -39,7 +39,7 @@ flowchart TD
 |------|-----------|
 | Merge de `feature-a` em `hml` | ➕ Adiciona `using-hml` no PR da feature-a |
 | Merge de `feature-b` em `hml` | ➕ Adiciona `using-hml` no PR da feature-b (feature-a **mantém** a label) |
-| Merge de `main` em `hml` | 🔄 Remove `using-hml` de **todos** os PRs (reset do ambiente) |
+| **Force push da main em hml** | 🔄 Remove `using-hml` de **todos** os PRs (reset do ambiente) |
 | Revert do merge de `feature-a` | ➖ Remove `using-hml` **apenas** do PR da feature-a |
 
 ---
@@ -48,7 +48,7 @@ flowchart TD
 
 1. **Visibilidade clara** de PRs integrados à HML.
 2. **Múltiplos PRs** podem estar em HML simultaneamente (concatenação de features).
-3. **Reset fácil** do ambiente mergeando a main.
+3. **Reset fácil** do ambiente via force push.
 4. **Reverts tratados** automaticamente, removendo a label do PR revertido.
 5. Workflow totalmente automático, sem intervenção manual.
 
@@ -67,8 +67,12 @@ flowchart TD
 2. ✅ Todos os PRs mergeados terão a label `using-hml`
 
 ### Resetar o ambiente HML
-1. Faça merge da branch `main` em `hml`
-2. ✅ Todas as labels `using-hml` serão removidas
+
+```bash
+git push --force origin main:hml
+```
+
+✅ Todas as labels `using-hml` serão removidas
 
 ### Reverter um merge
 1. Faça revert de um merge commit em `hml`
@@ -84,5 +88,5 @@ flowchart TD
 - Aciona o workflow de labels
 
 ### `apply-using-hml-label.yml`
-- Detecta o tipo de commit (revert, merge da main, merge de feature)
+- Detecta o tipo de commit (reset/force push, revert, merge de feature)
 - Aplica ou remove labels conforme o cenário

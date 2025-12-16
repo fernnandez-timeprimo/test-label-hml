@@ -23,8 +23,46 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gh jq
 
+      - name: Check if HML was reset to main (force push)
+        id: reset_check
+        run: |
+          # Verifica se o HEAD atual do hml é igual ao HEAD da main
+          # Isso detecta quando alguém faz: git push --force origin main:hml
+          
+          CURRENT_SHA="${{ github.sha }}"
+          MAIN_SHA=$(git rev-parse origin/main 2>/dev/null || echo "")
+          
+          echo "Current HML SHA: $CURRENT_SHA"
+          echo "Main SHA: $MAIN_SHA"
+          
+          if [ "$CURRENT_SHA" = "$MAIN_SHA" ]; then
+            echo "🔄 HML was reset to main (force push detected)"
+            echo "is_reset_to_main=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_reset_to_main=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Remove ALL labels (HML reset to main via force push)
+        if: steps.reset_check.outputs.is_reset_to_main == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔄 RESET HML: Force push to main detected - removing using-hml from ALL PRs"
+          ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
+          
+          if [ -z "$ALL" ]; then
+            echo "No PRs with using-hml label found"
+          else
+            for pr in $ALL; do
+              echo "Removing label from PR #$pr..."
+              gh pr edit $pr --remove-label "using-hml"
+            done
+            echo "✅ All using-hml labels removed - HML environment reset"
+          fi
+
       - name: Check for revert commit
         id: revert
+        if: steps.reset_check.outputs.is_reset_to_main != 'true'
         run: |
           COMMIT_MSG=$(git log -1 --pretty=%B ${{ github.sha }})
           echo "Commit message: $COMMIT_MSG"
@@ -57,7 +95,7 @@ jobs:
           fi
 
       - name: Remove label from reverted PR
-        if: steps.revert.outputs.is_revert == 'true' && steps.revert.outputs.reverted_branch != ''
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert == 'true' && steps.revert.outputs.reverted_branch != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -76,7 +114,7 @@ jobs:
 
       - name: Get merge commit parents
         id: parents
-        if: steps.revert.outputs.is_revert != 'true'
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert != 'true'
         run: |
           PARENTS=$(git rev-list --parents -n 1 ${{ github.sha }})
           echo "parents=$PARENTS" >> $GITHUB_OUTPUT
@@ -84,7 +122,7 @@ jobs:
 
       - name: Extract source branch name (if merge commit)
         id: branch
-        if: steps.revert.outputs.is_revert != 'true'
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert != 'true'
         run: |
           parents="${{ steps.parents.outputs.parents }}"
           count=$(echo "$parents" | wc -w)
@@ -92,7 +130,6 @@ jobs:
           if [ "$count" -ne 3 ]; then
             echo "Not a merge commit (direct push)"
             echo "is_merge=false" >> $GITHUB_OUTPUT
-            echo "is_main_merge=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -101,18 +138,11 @@ jobs:
 
           echo "is_merge=true" >> $GITHUB_OUTPUT
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
-
-          if [ "$branch_name" = "main" ] || [ "$branch_name" = "master" ]; then
-            echo "is_main_merge=true" >> $GITHUB_OUTPUT
-            echo "Detected merge from main/master - will reset HML labels"
-          else
-            echo "is_main_merge=false" >> $GITHUB_OUTPUT
-            echo "Detected merge from feature branch: $branch_name"
-          fi
+          echo "Detected merge from branch: $branch_name"
 
       - name: Find open PR for source branch
         id: pr
-        if: steps.branch.outputs.is_merge == 'true' && steps.branch.outputs.is_main_merge == 'false'
+        if: steps.branch.outputs.is_merge == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -133,26 +163,8 @@ jobs:
             echo "pr_number=$PR" >> $GITHUB_OUTPUT
           fi
 
-      - name: Remove using-hml from ALL PRs (main merge = reset HML)
-        if: steps.branch.outputs.is_main_merge == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "🔄 RESET HML: Merge from main detected - removing using-hml from ALL PRs"
-          ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
-          
-          if [ -z "$ALL" ]; then
-            echo "No PRs with using-hml label found"
-          else
-            for pr in $ALL; do
-              echo "Removing label from PR #$pr..."
-              gh pr edit $pr --remove-label "using-hml"
-            done
-            echo "✅ All using-hml labels removed - HML environment reset"
-          fi
-
       - name: Add using-hml label to this PR (feature branch merge)
-        if: steps.branch.outputs.is_merge == 'true' && steps.branch.outputs.is_main_merge == 'false' && steps.pr.outputs.pr_number != ''
+        if: steps.branch.outputs.is_merge == 'true' && steps.pr.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
