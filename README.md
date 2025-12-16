@@ -24,11 +24,13 @@ flowchart TD
     A[Push na branch HML] --> B{HML = main? force push}
     B -->|Sim| C[🔄 RESET: Remove TODAS as labels]
     B -->|Não| D{É revert commit?}
-    D -->|Sim| E[Remove label do PR revertido]
-    D -->|Não| F{É merge commit?}
-    F -->|Não| G[Nenhuma ação]
-    F -->|Sim| H[Localiza PR de origem]
-    H --> I[➕ Adiciona label usando-hml ao PR]
+    D -->|Sim| E[➖ Remove label do PR revertido]
+    D -->|Não| F{É reapply commit?}
+    F -->|Sim| G[➕ Adiciona label ao PR reapplicado]
+    F -->|Não| H{É merge commit?}
+    H -->|Não| I[Nenhuma ação]
+    H -->|Sim| J[Localiza PR de origem]
+    J --> K[➕ Adiciona label usando-hml ao PR]
 ```
 
 ---
@@ -41,6 +43,7 @@ flowchart TD
 | Merge de `feature-b` em `hml` | ➕ Adiciona `using-hml` no PR da feature-b (feature-a **mantém** a label) |
 | **Force push da main em hml** | 🔄 Remove `using-hml` de **todos** os PRs (reset do ambiente) |
 | Revert do merge de `feature-a` | ➖ Remove `using-hml` **apenas** do PR da feature-a |
+| Reapply (revert do revert) de `feature-a` | ➕ Adiciona `using-hml` de volta no PR da feature-a |
 
 ---
 
@@ -77,6 +80,13 @@ git push --force origin main:hml
 ### Reverter um merge
 1. Faça revert de um merge commit em `hml`
 2. ✅ A label `using-hml` será removida apenas do PR correspondente
+
+### Reaplica um merge revertido
+1. Faça revert do commit de revert (reapply)
+```bash
+git revert <hash-do-commit-de-revert>
+```
+2. ✅ A label `using-hml` será adicionada de volta ao PR
 
 ---
 
