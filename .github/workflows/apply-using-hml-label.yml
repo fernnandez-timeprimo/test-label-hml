@@ -37,8 +37,9 @@ jobs:
           count=$(echo "$parents" | wc -w)
 
           if [ "$count" -ne 3 ]; then
-            echo "Not a merge commit"
+            echo "Not a merge commit (direct push)"
             echo "is_merge=false" >> $GITHUB_OUTPUT
+            echo "is_main_merge=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -48,9 +49,17 @@ jobs:
           echo "is_merge=true" >> $GITHUB_OUTPUT
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
 
+          if [ "$branch_name" = "main" ] || [ "$branch_name" = "master" ]; then
+            echo "is_main_merge=true" >> $GITHUB_OUTPUT
+            echo "Detected merge from main/master - will reset HML labels"
+          else
+            echo "is_main_merge=false" >> $GITHUB_OUTPUT
+            echo "Detected merge from feature branch: $branch_name"
+          fi
+
       - name: Find open PR for source branch
         id: pr
-        if: steps.branch.outputs.is_merge == 'true'
+        if: steps.branch.outputs.is_merge == 'true' && steps.branch.outputs.is_main_merge == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -71,12 +80,12 @@ jobs:
             echo "pr_number=$PR" >> $GITHUB_OUTPUT
           fi
 
-      - name: Remove using-hml from all PRs (non-merge commit)
-        if: steps.branch.outputs.is_merge != 'true'
+      - name: Remove using-hml from ALL PRs (main merge = reset HML)
+        if: steps.branch.outputs.is_main_merge == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "This is NOT a merge commit - removing using-hml from ALL PRs"
+          echo "🔄 RESET HML: Merge from main detected - removing using-hml from ALL PRs"
           ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
           
           if [ -z "$ALL" ]; then
@@ -86,35 +95,19 @@ jobs:
               echo "Removing label from PR #$pr..."
               gh pr edit $pr --remove-label "using-hml"
             done
+            echo "✅ All using-hml labels removed - HML environment reset"
           fi
 
-      - name: Remove using-hml from other PRs (merge commit)
-        if: steps.branch.outputs.is_merge == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "This IS a merge commit - removing using-hml from other PRs"
-          CURRENT_PR="${{ steps.pr.outputs.pr_number }}"
-          ALL=$(gh pr list --state open --label "using-hml" --json number --jq '.[].number')
-
-          for pr in $ALL; do
-            if [ "$pr" != "$CURRENT_PR" ]; then
-              echo "Removing label from PR #$pr..."
-              gh pr edit $pr --remove-label "using-hml"
-            else
-              echo "Keeping label on current PR #$pr"
-            fi
-          done
-
-      - name: Add using-hml label to this PR
-        if: steps.branch.outputs.is_merge == 'true' && steps.pr.outputs.pr_number != ''
+      - name: Add using-hml label to this PR (feature branch merge)
+        if: steps.branch.outputs.is_merge == 'true' && steps.branch.outputs.is_main_merge == 'false' && steps.pr.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR="${{ steps.pr.outputs.pr_number }}"
           if [ -n "$PR" ] && [ "$PR" != "null" ]; then
-            echo "Adding using-hml to PR #$PR"
+            echo "➕ Adding using-hml label to PR #$PR"
             gh pr edit "$PR" --add-label "using-hml"
+            echo "✅ PR #$PR marked as using HML"
           else
             echo "No PR number available, skipping label addition"
           fi
