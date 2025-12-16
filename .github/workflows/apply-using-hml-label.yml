@@ -60,7 +60,7 @@ jobs:
             echo "✅ All using-hml labels removed - HML environment reset"
           fi
 
-      - name: Check for revert commit
+      - name: Check for revert or reapply commit
         id: revert
         if: steps.reset_check.outputs.is_reset_to_main != 'true'
         run: |
@@ -70,6 +70,7 @@ jobs:
           # Verifica se é um revert commit
           if echo "$COMMIT_MSG" | grep -qi "^Revert"; then
             echo "is_revert=true" >> $GITHUB_OUTPUT
+            echo "is_reapply=false" >> $GITHUB_OUTPUT
             echo "🔄 Detected revert commit"
             
             # Tenta extrair o nome da branch do commit revertido
@@ -87,19 +88,38 @@ jobs:
               BRANCH_FROM_MSG=$(echo "$COMMIT_MSG" | grep -oP "Revert \"Merge \K[^\"]+into" | sed 's/ into$//')
             fi
             
-            echo "reverted_branch=$BRANCH_FROM_MSG" >> $GITHUB_OUTPUT
+            echo "branch_name=$BRANCH_FROM_MSG" >> $GITHUB_OUTPUT
             echo "Reverted branch: $BRANCH_FROM_MSG"
+          
+          # Verifica se é um reapply commit (revert do revert)
+          elif echo "$COMMIT_MSG" | grep -qi "^Reapply"; then
+            echo "is_revert=false" >> $GITHUB_OUTPUT
+            echo "is_reapply=true" >> $GITHUB_OUTPUT
+            echo "🔄 Detected reapply commit (revert of revert)"
+            
+            # Tenta extrair o nome da branch do commit reapply
+            # Padrão: Reapply "Merge branch 'feature-x' into hml"
+            BRANCH_FROM_MSG=$(echo "$COMMIT_MSG" | grep -oP "Merge branch '\K[^']+")
+            
+            if [ -z "$BRANCH_FROM_MSG" ]; then
+              # Tenta padrão de PR: from owner/branch-name
+              BRANCH_FROM_MSG=$(echo "$COMMIT_MSG" | grep -oP "from [^/]+/\K[^\s\"]+")
+            fi
+            
+            echo "branch_name=$BRANCH_FROM_MSG" >> $GITHUB_OUTPUT
+            echo "Reapplied branch: $BRANCH_FROM_MSG"
           else
             echo "is_revert=false" >> $GITHUB_OUTPUT
-            echo "Not a revert commit"
+            echo "is_reapply=false" >> $GITHUB_OUTPUT
+            echo "Not a revert or reapply commit"
           fi
 
       - name: Remove label from reverted PR
-        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert == 'true' && steps.revert.outputs.reverted_branch != ''
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert == 'true' && steps.revert.outputs.branch_name != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="${{ steps.revert.outputs.reverted_branch }}"
+          BRANCH="${{ steps.revert.outputs.branch_name }}"
           echo "🔄 REVERT: Looking for PR with branch '$BRANCH' to remove using-hml label"
           
           PR=$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number')
@@ -112,9 +132,27 @@ jobs:
             echo "No open PR found for branch '$BRANCH'"
           fi
 
+      - name: Add label to reapplied PR
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_reapply == 'true' && steps.revert.outputs.branch_name != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ steps.revert.outputs.branch_name }}"
+          echo "🔄 REAPPLY: Looking for PR with branch '$BRANCH' to add using-hml label"
+          
+          PR=$(gh pr list --state open --head "$BRANCH" --json number --jq '.[0].number')
+          
+          if [ -n "$PR" ] && [ "$PR" != "null" ]; then
+            echo "Found PR #$PR for reapplied branch"
+            gh pr edit "$PR" --add-label "using-hml" || echo "Label might already exist on PR"
+            echo "✅ Added using-hml label to PR #$PR (branch was reapplied)"
+          else
+            echo "No open PR found for branch '$BRANCH'"
+          fi
+
       - name: Get merge commit parents
         id: parents
-        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert != 'true'
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert != 'true' && steps.revert.outputs.is_reapply != 'true'
         run: |
           PARENTS=$(git rev-list --parents -n 1 ${{ github.sha }})
           echo "parents=$PARENTS" >> $GITHUB_OUTPUT
@@ -122,7 +160,7 @@ jobs:
 
       - name: Extract source branch name (if merge commit)
         id: branch
-        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert != 'true'
+        if: steps.reset_check.outputs.is_reset_to_main != 'true' && steps.revert.outputs.is_revert != 'true' && steps.revert.outputs.is_reapply != 'true'
         run: |
           parents="${{ steps.parents.outputs.parents }}"
           count=$(echo "$parents" | wc -w)
